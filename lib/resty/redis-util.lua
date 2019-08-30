@@ -265,6 +265,13 @@ function _M.new(self, opts)
     return nil, "user_config must be a table"
   end
 
+  host = '127.0.0.1'
+  port = 6379
+  db_index = 0
+  password = nil
+  keepalive = 60000 --60s
+  pool_size = 100
+
   for k, v in pairs(opts) do
     if k == "host" then
       if type(v) ~= "string" then
