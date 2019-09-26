@@ -23,17 +23,9 @@ local CRIT                  = ngx.CRIT
 local MAX_PORT              = 65535
 
 
-local host                  = '127.0.0.1'
-local port                  = 6379
-local db_index              = 0
-local password              = nil
-local keepalive             = 60000 --60s
-local pool_size             = 100
-
-
 -- if res is ngx.null or nil or type(res) is table and all value is ngx.null return true else false
 local function _is_null(res)
-  if res == ngx.null or res ==nil then
+  if res == ngx.null or res == nil then
     return true
   elseif type(res) == "table" then
     for _, v in pairs(res) do
@@ -48,45 +40,42 @@ local function _is_null(res)
 end
 
 
-local function _debug_err(msg,err)
+local function _debug_err(msg, err)
   if debug then
     ngx_log(DEBUG, msg ,err)
   end
 end
 
 -- encapsulation redis connect
-local function _connect_mod(self,redis)
+local function _connect_mod(self, redis)
   
   -- set redis host,port
-  local ok, err = redis:connect(host, port)
+  local ok, err = redis:connect(self.host, self.port)
   if not ok or err then
-  
-    _debug_err("previous connection not finished,reason::",err)
-    
+    _debug_err("previous connection not finished,reason::", err)
     return nil, err
   end
   
   -- set auth
-  if password then
+  if self.password and self.password ~= "" then
     local times, err = redis:get_reused_times()
     
     if times == 0 then
-    
-      local ok, err = redis:auth(password)
+      local ok, err = redis:auth(self.password)
       if not ok or err then
-        _debug_err("failed to set redis password,reason::",err)
+        _debug_err("failed to set redis password,reason::", err)
         return nil, err
       end
     elseif err then
-      _debug_err( "failed to get this connect reused times,reason::",err)
+      _debug_err("failed to get this connect reused times,reason::", err)
       return nil, err
     end
   end
   
-  if db_index >0 then 
-    local ok, err = redis:select(db_index)
+  if self.db_index > 0 then 
+    local ok, err = redis:select(self.db_index)
       if not ok or err then
-        _debug_err( "failed to select redis databse index to" , db_index , ",reason::",err)
+        _debug_err("failed to select redis databse index to", self.db_index, ",reason::", err)
         return nil, err
       end
   end
@@ -95,50 +84,50 @@ local function _connect_mod(self,redis)
 end
 
 
-local function _init_connect()
+local function _init_connect(self)
   -- init redis
   local redis, err = redis_c:new()
   if not redis then
-    _debug_err( "failed to init redis,reason::",err)
+    _debug_err("failed to init redis,reason::", err)
     return nil, err
   end
 
   -- get connect
-  local ok, err = _connect_mod(self,redis)
+  local ok, err = _connect_mod(self, redis)
   if not ok or err then
-    _debug_err( "failed to create redis connection,reason::",err)
+    _debug_err("failed to create redis connection,reason::", err)
     return nil, err
   end
-  return redis,nil
+  return redis, nil
 end
 
 -- put it into the connection pool of size (default 100), with max idle time (default 60s)
-local function _set_keepalive_mod(self,redis )
-  return redis:set_keepalive(keepalive, pool_size)
+local function _set_keepalive_mod(self, redis)
+  return redis:set_keepalive(self.keepalive, self.pool_size)
 end
 
 -- encapsulation subscribe
-function _M.subscribe( self, channel )
+function _M.subscribe(self, channel)
 
   -- init redis
-  local redis, err = _init_connect()
+  local redis, err = _init_connect(self)
   if not redis then
-    _debug_err( "failed to init redis,reason::",err)
+    _debug_err("failed to init redis,reason::", err)
     return nil, err
   end
 
   -- sub channel
   local res, err = redis:subscribe(channel)
   if not res then
-    _debug_err("failed to subscribe channel,reason:",err)
+    _debug_err("failed to subscribe channel,reason:", err)
     return nil, err
   end
 
-  local function do_read_func ( do_read )
+  local function do_read_func(do_read)
     if do_read == nil or do_read == true then
       res, err = redis:read_reply()
       if not res then
-        _debug_err("failed to read subscribe channel reply,reason:",err)
+        _debug_err("failed to read subscribe channel reply,reason:", err)
         return nil, err
       end
       return res
@@ -146,7 +135,7 @@ function _M.subscribe( self, channel )
     
     -- if do_read is false 
     redis:unsubscribe(channel)
-    _set_keepalive_mod(self,redis)
+    _set_keepalive_mod(self, redis)
     return
   end
 
@@ -175,9 +164,9 @@ function _M.commit_pipeline(self)
   self._reqs = nil
 
   -- init redis
-  local redis, err = _init_connect()
+  local redis, err = _init_connect(self)
   if not redis then
-    _debug_err( "failed to init redis,reason::",err)
+    _debug_err("failed to init redis,reason::", err)
     return nil, err
   end
 
@@ -188,7 +177,7 @@ function _M.commit_pipeline(self)
     -- vals[1] is redis cmd
     local fun = redis[vals[1]]
     -- get params without cmd
-    table.remove(vals , 1)
+    table.remove(vals, 1)
     -- invoke redis cmd 
     fun(redis, unpack(vals))
   end
@@ -196,7 +185,7 @@ function _M.commit_pipeline(self)
   -- commit pipeline
   local results, err = redis:commit_pipeline()
   if not results or err then
-    _debug_err( "failed to commit pipeline,reason:",err)
+    _debug_err("failed to commit pipeline,reason:", err)
     return {}, err
   end
 
@@ -207,7 +196,7 @@ function _M.commit_pipeline(self)
   end
 
   -- put it into the connection pool
-  _set_keepalive_mod(self,redis)
+  _set_keepalive_mod(self, redis)
 
   -- if null set default value nil
   for i,value in ipairs(results) do
@@ -226,14 +215,14 @@ local function do_command(self, cmd, ...)
   local _reqs = rawget(self, "_reqs")
   if _reqs then
     -- append reqs
-    _reqs[#_reqs + 1] = {cmd,...}
+    _reqs[#_reqs + 1] = {cmd, ...}
     return
   end
   
   -- init redis
-  local redis, err = _init_connect()
+  local redis, err = _init_connect(self)
   if not redis then
-    _debug_err( "failed to init redis,reason::",err)
+    _debug_err("failed to init redis,reason::", err)
     return nil, err
   end
 
@@ -250,7 +239,7 @@ local function do_command(self, cmd, ...)
   end
 
   -- put it into the connection pool
-  local ok, err = _set_keepalive_mod(self,redis)
+  local ok, err = _set_keepalive_mod(self, redis)
   if not ok or err then
     return nil, err
   end
@@ -265,12 +254,12 @@ function _M.new(self, opts)
     return nil, "user_config must be a table"
   end
 
-  host = '127.0.0.1'
-  port = 6379
-  db_index = 0
-  password = nil
-  keepalive = 60000 --60s
-  pool_size = 100
+  local host = '127.0.0.1'
+  local port = 6379
+  local db_index = 0
+  local password = ""
+  local keepalive = 60000 --60s
+  local pool_size = 100
 
   for k, v in pairs(opts) do
     if k == "host" then
@@ -316,7 +305,16 @@ function _M.new(self, opts)
     return nil, "no redis server configured. \"host\"/\"port\" is required."
   end
   
-  return setmetatable({},mt)
+  return setmetatable(
+    {
+      host = host,
+      port = port,
+      db_index = db_index,
+      password = password,
+      keepalive = keepalive,
+      pool_size = pool_size,
+    },
+    mt)
 end
 
 -- dynamic cmd
