@@ -48,7 +48,8 @@ end
 
 -- encapsulation redis connect
 local function _connect_mod(self, redis)
-  
+  redis:set_timeout(self.timeout)
+
   -- set redis host,port
   local ok, err = redis:connect(self.host, self.port)
   if not ok or err then
@@ -260,6 +261,7 @@ function _M.new(self, opts)
   local password = ""
   local keepalive = 60000 --60s
   local pool_size = 100
+  local timeout = 3000
 
   for k, v in pairs(opts) do
     if k == "host" then
@@ -292,6 +294,11 @@ function _M.new(self, opts)
       if type(v) ~= "number" or v < 0 then
         return nil, 'invalid "timeout"'
       end
+      timeout = v
+    elseif k == "keepalive" then
+      if type(v) ~= "number" or v < 0 then
+        return nil, 'invalid "keepalive"'
+      end
       keepalive = v
     elseif k == "pool_size" then
       if type(v) ~= "number" or v < 0 then
@@ -312,6 +319,7 @@ function _M.new(self, opts)
       db_index = db_index,
       password = password,
       keepalive = keepalive,
+      timeout = timeout,
       pool_size = pool_size,
     },
     mt)
